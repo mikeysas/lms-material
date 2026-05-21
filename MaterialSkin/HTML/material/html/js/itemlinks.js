@@ -19,6 +19,25 @@ function show_artist(event, id, title, page) {
     browseItem(event, ["albums"], ["artist_id:"+id, ARTIST_ALBUM_TAGS, SORT_KEY+ARTIST_ALBUM_SORT_PLACEHOLDER], unescape(title), page);
 }
 
+function show_artist_list(event, artist_ids, artists, title, page) {
+    if (undefined!=artist_ids) {
+        event.stopPropagation();
+        if (artist_ids.length==1) {
+            show_artist(event, artist_ids[0], artists[0], page);
+            return;
+        }
+        var choices = [];
+        for (var i=0, len=artist_ids.length; i<len; ++i) {
+            choices.push({title:unescape(artists[i]), id:artist_ids[i]});
+        }
+        choose(ACTIONS[GOTO_ARTIST_ACTION].title, choices).then(choice => {
+            if (undefined!=choice) {
+                show_artist(event, choice.id, escape(choice.title), page);
+            }
+        });
+    }
+}
+
 function showAlbum(event, album, title, page, subtitle) {
     browseItem(event, ["tracks"], ["album_id:"+album, trackTags(true), SORT_KEY+"tracknum"], unescape(title), page, undefined==subtitle ? subtitle : unescape(subtitle));
 }
@@ -74,7 +93,34 @@ function buildLink(func, id, str, page, extra) {
 }
 
 function addArtistLink(item, line, type, func, page, used, plain) {
-    if (lmsOptions.showAllArtists && undefined!=item[type+"s"] && item[type+"s"].length>1) {
+    if (undefined!=item.display_artist || undefined!=item.display_artist_album && type=='albumartist') {
+        let val = type=='albumartist' && item.display_artist_album ? item.display_artist_album : item.display_artist;
+        let artist_ids = item[type+"_ids"];
+        if (undefined==artist_ids) {
+            artist_ids =
+                undefined!=item.trackartist_ids
+                    ? item.trackartist_ids
+                    : undefined!=item.artist_ids
+                        ? item.artist_ids
+                        : undefined!=item.albumartist_ids
+                            ? item.albumartist_ids
+                            : undefined;
+        }
+        let artists = item[type+"s"];
+        if (undefined!=artists) {
+            artists = artists.join("','");
+        } else {
+            artists =
+                undefined!=item.trackartists
+                    ? item.trackartists.join("','")
+                    : undefined!=item.artists
+                        ? item.artists.join("','")
+                        : undefined!=item.albumartists
+                            ? item.albumartists.join("','")
+                            : undefined;
+        }
+        line=addPart(line, "<obj class=\"link-item\" onclick=\"show_artist_list(event, ["+artist_ids+"], ['"+artists+"'], \'"+escape(val)+"\', \'"+page+"\'"+")\">" + val + "</obj>");
+    } else if (lmsOptions.showAllArtists && undefined!=item[type+"s"] && item[type+"s"].length>1) {
         let canUse = new Set();
         let canUseVals = [];
         for (let i=0, loop=item[type+"s"], len=loop.length; i<len; ++i) {
@@ -216,7 +262,7 @@ function buildAlbumLine(i, page, plain, addSubtitle) {
             album+=" (" + i.year + ")";
         }
         if (i.album_id && (!IS_MOBILE || lmsOptions.touchLinks) && !plain) {
-            let artist = i.albumartist ? i.albumartist : i.artist;
+            let artist = i.display_artist ? i.display_artist : i.albumartist ? i.albumartist : i.artist;
             album="<obj class=\"link-item\" onclick=\"showAlbum(event, "+i.album_id+",\'"+escape(album)+"\',\'"+page+"\',\'"+escape(artist)+"\')\">" + album + "</obj>";
         }
         if (addSubtitle) {
@@ -275,7 +321,9 @@ function buildWorkLine(i, page, plain) {
 }
 
 function buildArtists(i, line, page, used, plain) {
-    if (lmsOptions.showAllArtists) {
+    if (i.display_artist) {
+        line=addArtistLink(i, line, "artist", "show_artist", page, used, plain);
+    } else if (lmsOptions.showAllArtists) {
         if (i.artist) {
             line=addArtistLink(i, line, "artist", "show_artist", page, used, plain);
             used.add(i.artist);
