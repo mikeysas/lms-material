@@ -640,7 +640,9 @@ var lmsBrowse = Vue.component("lms-browse", {
             highlightSubIndex: -1,
             hRgb: "000",
             tall: window.innerHeight>=MIN_HEIGHT_FOR_DETAILED_SUB ? 1 : 0,
-            currentTrack: undefined
+            currentTrack: undefined,
+            nowPlayingExpanded: false,
+            maiShown: false,
         }
     },
     computed: {
@@ -887,7 +889,7 @@ var lmsBrowse = Vue.component("lms-browse", {
             return this.$store.state.desktopLayout && this.$store.state.pinQueue
         },
         browseSearch() {
-            return this.$store.state.browseSearch
+            return this.$store.state.browseSearch && (this.$store.state.desktopLayout ? !this.nowPlayingExpanded && !this.maiShown && !this.unpinnedQueueVisible : this.$store.state.page=='browse');
         }
     },
     created() {
@@ -974,7 +976,7 @@ var lmsBrowse = Vue.component("lms-browse", {
             }.bind(this));
         }
         bus.$on('advSearchResults', function(item, command, resp) {
-            this.handleListResponse(item, command, resp);
+            browseHandleListResponse(this, item, command, resp);
             this.tbarActions.unshift(ADV_SEARCH_ACTION);
             if (this.items.length>0) {
                 this.tbarActions.unshift(SAVE_VLIB_ACTION);
@@ -1135,11 +1137,11 @@ var lmsBrowse = Vue.component("lms-browse", {
                 if (this.isCurrentReq(data)) {
                     var resp = parseBrowseResp(data, item, this.options, item.cancache && browseCanUseCache(this) ? cacheKey(command.command, command.params, 0, count) : undefined);
                     this.fetchingItem = undefined;
-                    this.handleListResponse(item, command, resp, prevPage, startIndex>0);
+                    browseHandleListResponse(this, item, command, resp, prevPage, startIndex>0);
                 }
             }).catch(err => {
                 this.fetchingItem = undefined;
-                this.handleListResponse(item, command, {items: []});
+                browseHandleListResponse(this, item, command, {items: []});
                 logError(err, command.command, command.params, 0, count);
                 logNoPlayerError(this);
             });
@@ -1342,7 +1344,8 @@ var lmsBrowse = Vue.component("lms-browse", {
                 } else {
                     let command = JSON.parse(JSON.stringify(item.morecmd));
                     browseReplaceCommandTerms(this, command, item);
-                    this.fetchItems(command, {cancache:false, id:item.id, title: item.title, limit:item.limit, section:item.section, isFavFolder:item.isFavFolder});
+                    command.params.push("features:hi");
+                    this.fetchItems(command, {cancache:false, slimbrowse:item.slimbrowse, id:item.id, title: item.title, limit:item.limit, section:item.section, isFavFolder:item.isFavFolder});
                 }
             } else if (item.allItems) {
                 browseAddHistory(this);
@@ -1952,7 +1955,7 @@ var lmsBrowse = Vue.component("lms-browse", {
             if (force || sz.nc != this.grid.numColumns || (this.isTop && sz.h != this.grid.szh) || type!=this.grid.type) { // Need to re-layout...
                 changed = true;
                 this.grid.rows = [];
-                this.grid.multiSize = false;
+                this.grid.multiSize = this.numHeaders>0;
                 let items = [];
                 let topExtraItems = [];
                 let haveExploreInScrolledList = false;
@@ -2429,7 +2432,10 @@ var lmsBrowse = Vue.component("lms-browse", {
         bus.$on('nowPlayingExpanded', function(val) {
             this.nowPlayingExpanded = val;
         }.bind(this));
-
+        this.maiShown = false;
+        bus.$on('infoDialog', function(val) {
+            this.maiShown = val;
+        }.bind(this));
         bus.$on('closeMenu', function() {
             this.menu.show = false;
         }.bind(this));
@@ -2438,7 +2444,7 @@ var lmsBrowse = Vue.component("lms-browse", {
             if (this.dragActive) {
                 return;
             }
-            if (this.$store.state.desktopLayout ? !this.nowPlayingExpanded : this.$store.state.page=='browse') {
+            if (this.$store.state.desktopLayout ? !this.nowPlayingExpanded && !this.maiShown : this.$store.state.page=='browse') {
                 if (this.selection.size>0) {
                     this.clearSelection();
                 } else if (this.history.length>0) {
