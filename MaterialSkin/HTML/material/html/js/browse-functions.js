@@ -492,13 +492,13 @@ function browseHandleListResponse(view, item, command, resp, prevPage, appendIte
                 actParams[currentId[0]]=currentId[1];
             }
             if (undefined!=artist_id && artist_id.indexOf(".")<0) {
-                actParams["artist_id"] = artist_id;
+                actParams["artist_id"] = originalId(artist_id);
             }
             if (undefined!=work_id && work_id.indexOf(".")<0) {
-                actParams["work_id"] = work_id;
+                actParams["work_id"] = originalId(work_id);
             }
             if (undefined!=album_id && album_id.indexOf(".")<0) {
-                actParams["album_id"] = album_id;
+                actParams["album_id"] = originalId(album_id);
             }
             if (listingArtistAlbums) {
                 actParams['artist']=title;
@@ -525,7 +525,7 @@ function browseHandleListResponse(view, item, command, resp, prevPage, appendIte
                 actParams['count']=resp.items.length;
                 var field = getField(view.command, "composer_id:");
                 if (field>=0) {
-                    actParams['composer_id']=view.command.params[field];
+                    actParams['composer_id']=originalId(view.command.params[field]);
                 }
                 field = getField(view.command, "performance:");
                 if (field>=0) {
@@ -820,9 +820,13 @@ function browseHandleListResponse(view, item, command, resp, prevPage, appendIte
         // Issue #1231 Clicking on album link in queue, or now-playing, will browse tracks - but only show
         // current artist. LMS9.2 /might/ send an album_header with titles_loop - if so use that.
         if (undefined!=resp.listHeader && undefined!=view.current && view.current.stdItem==STD_ITEM_ALBUM) {
-            view.current.subtitle = resp.listHeader.title_names.join(SEPARATOR)
+            view.current.subtitle = resp.listHeader.display_artist ? resp.listHeader.display_artist+SEPARATOR : "";
+            view.current.subtitle = view.current.subtitle+resp.listHeader.title_names.join(SEPARATOR);
             view.current.artists = resp.listHeader.title_names;
             view.current.artist_ids = resp.listHeader.title_ids;
+            view.current.display_artist = resp.listHeader.display_artist;
+            view.current.display_artist_artists = resp.listHeader.display_artist_artists;
+            view.current.display_artist_artist_ids = resp.listHeader.display_artist_artist_ids;
         }
         view.$nextTick(function () {
             view.setBgndCover();
@@ -1720,7 +1724,7 @@ function browseItemAction(view, act, origItem, index, event, slimBrowseBaseActio
             if (view.allTracksItem) {
                 view.itemAction(ADD_ALL_ACTION==act ? ADD_ACTION : INSERT_ALL_ACTION==act ? INSERT_ACTION : PLAY_SHUFFLE_ALL_ACTION==act ? PLAY_SHUFFLE_ACTION : PLAY_ACTION, view.allTracksItem);
             } else {
-                view.doList(view.items, act);
+                browseDoList(view, view.items, act);
                 bus.$emit('showMessage', i18n("Adding tracks..."));
             }
         } else { // Need to filter items...
@@ -1745,23 +1749,32 @@ function browseItemAction(view, act, origItem, index, event, slimBrowseBaseActio
             }
 
             if (itemList.length>0) {
-                view.doList(itemList, act, itemIndex);
+                browseDoList(view, itemList, act, itemIndex);
                 bus.$emit('showMessage', isFilter || item.id.endsWith("tracks") ? i18n("Adding tracks...") : i18n("Adding albums..."));
             }
         }
     } else if (act==GOTO_ARTIST_ACTION) {
-        if (undefined!=item.artist_ids && item.artist_ids.length>1) {
+        let choiceCount = item.artist_ids ? item.artist_ids.length : 0;
+        choiceCount = item.display_artist ? choiceCount+1 : choiceCount;
+        if (choiceCount>1) {
             var choices = [];
+            if (undefined!=item.display_artist) {
+                choices.push({title:item.display_artist, daNames:item.display_artist_artists, id:item.display_artist_artist_ids});
+            }
             for (var i=0, len=item.artist_ids.length; i<len; ++i) {
                 choices.push({title:item.artists[i], id:item.artist_ids[i]});
             }
             choose(ACTIONS[GOTO_ARTIST_ACTION].title, choices).then(choice => {
                 if (undefined!=choice) {
-                    view.fetchItems(browseReplaceCommandTerms(view, {command:["albums"], params:["artist_id:"+choice.id, ARTIST_ALBUM_TAGS, SORT_KEY+ARTIST_ALBUM_SORT_PLACEHOLDER]}), {cancache:false, id:"artist_id:"+choice.id, title:choice.title, stdItem:STD_ITEM_ARTIST});
+                    if (undefined!=choice.daNames) {
+                        show_artist_list(undefined, choice.id, choice.daNames, choice.title, 'browse');
+                    } else {
+                        view.fetchItems(browseReplaceCommandTerms(view, {command:["albums"], params:["artist_id:"+choice.id, ARTIST_ALBUM_TAGS, SORT_KEY+ARTIST_ALBUM_SORT_PLACEHOLDER]}), {cancache:false, id:"artist_id:"+choice.id, title:choice.title, stdItem:STD_ITEM_ARTIST});
+                    }
                 }
             });
         } else {
-            let artist_id = item.artist_id;
+            let artist_id = item.artist_id ? item.artist_id : item.display_artist_artist_ids ? item.display_artist_artist_ids[0] : undefined;
             // artist_id may be undefined if current track list is created from cliking on album entry in queue
             // or now-playing. If so, then get artist_id from command.
             if (undefined==artist_id && view.command.params.length>0) {
@@ -1965,11 +1978,15 @@ function browseItemAction(view, act, origItem, index, event, slimBrowseBaseActio
                                 tracks = loop[i].allItems;
                                 break;
                             } else if (!loop[i].header && (undefined==choice.id || loop[i].filter==choice.id)) {
-                                tracks.push(loop[i]);
+                                if (INSERT_ACTION==act) {
+                                    tracks.unshift(loop[i]);
+                                } else {
+                                    tracks.push(loop[i]);
+                                }
                             }
                         }
                         if (tracks.length>0) {
-                            view.doList(tracks, act);
+                            browseDoList(view, tracks, act);
                             bus.$emit('showMessage', i18n("Adding tracks..."));
                         }
                     }
